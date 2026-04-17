@@ -68,6 +68,7 @@
   <!-- Timeline list -->
   {#if tab === 'list'}
     <section class="section">
+      <p class="notice">表示は目安です。提出前・受験前に Moodle 本体で最終確認してください。</p>
       {#if status === 'loading'}
         <p class="hint">読み込み中...</p>
       {:else if status === 'no-moodle'}
@@ -181,6 +182,17 @@
       </button>
     </section>
   {/if}
+
+  <footer class="footer-links">
+    <a
+      class="github-link"
+      href="https://github.com/shiki-01/moodline"
+      target="_blank"
+      rel="noreferrer"
+    >
+      GitHub で見る
+    </a>
+  </footer>
 </div>
 
 <style>
@@ -202,6 +214,16 @@
   .tab.active { color:#3b82f6;border-bottom-color:#3b82f6; }
 
   .hint { font-size:12px;color:#999;text-align:center;padding:16px 0;margin:0; }
+  .notice {
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: #7c2d12;
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 7px;
+    line-height: 1.45;
+  }
 
   .list { display:flex;flex-direction:column;gap:7px;max-height:340px;overflow-y:auto; }
   .card { background:#fff;border-radius:8px;padding:9px 10px;
@@ -250,4 +272,22 @@
     text-align:right;
   }
   .opacity-note { margin:6px 0 0; font-size:11px; color:#777; }
+
+  .footer-links {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+  }
+
+  .github-link {
+    font-size: 12px;
+    color: #2563eb;
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .github-link:hover {
+    text-decoration: underline;
+  }
 </style>
