@@ -16,7 +16,12 @@
 GitHub Release には次のアセットが添付されます。
 
 - `moodline-<tag>.zip`（配布用 ZIP）
-- `moodline-<tag>.xpi`（unsigned XPI）
+- `moodline-<tag>.xpi`（Firefox 用 XPI。署名キー設定時は署名済み）
+
+GitHub Secrets に次を設定すると、Release 作成時に XPI を AMO で自動署名します。
+
+- `AMO_JWT_ISSUER`
+- `AMO_JWT_SECRET`
 
 リリース本文には、各アセットの対応ブラウザ（Chrome / Firefox）と README へのリンクを自動で追記します。
 
