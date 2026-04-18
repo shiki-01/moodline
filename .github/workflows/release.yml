@@ -20,6 +20,7 @@ jobs:
     env:
       AMO_JWT_ISSUER: ${{ secrets['AMO_JWT_ISSUER'] }}
       AMO_JWT_SECRET: ${{ secrets['AMO_JWT_SECRET'] }}
+      AMO_SIGN_CHANNEL: ${{ vars.AMO_SIGN_CHANNEL || 'unlisted' }}
 
     steps:
       - name: Resolve ref
@@ -61,11 +62,17 @@ jobs:
         env:
           WEB_EXT_API_KEY: ${{ env.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ env.AMO_JWT_SECRET }}
+          WEB_EXT_CHANNEL: ${{ env.AMO_SIGN_CHANNEL }}
         run: |
+          channel="$(echo "$WEB_EXT_CHANNEL" | tr '[:upper:]' '[:lower:]')"
+          if [ "$channel" != "listed" ] && [ "$channel" != "unlisted" ]; then
+            channel="unlisted"
+          fi
+
           npx --yes web-ext sign \
             --source-dir dist \
             --artifacts-dir firedox-dist \
-            --channel listed \
+            --channel "$channel" \
             --api-key "$WEB_EXT_API_KEY" \
             --api-secret "$WEB_EXT_API_SECRET" \
             --upload-source-code "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-source.zip"

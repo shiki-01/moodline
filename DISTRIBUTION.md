@@ -24,6 +24,14 @@ GitHub Release には次のアセットが添付されます。
 - `AMO_JWT_ISSUER`
 - `AMO_JWT_SECRET`
 
+オプションで GitHub Variables に `AMO_SIGN_CHANNEL` を設定できます。
+
+- 既定値: `unlisted`
+- 指定可能値: `unlisted` / `listed`
+
+`listed` を使う場合は AMO 側でライセンスなどのメタデータ要件を満たしている必要があります。
+メタデータが不足していると `version.license is required for listed versions` で署名が失敗します。
+
 署名済みファイル名: `moodline-<tag>-signed.xpi`
 
 ### 手動で流れだけ確認する場合
