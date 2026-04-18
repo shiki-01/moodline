@@ -68,7 +68,7 @@ jobs:
             --channel listed \
             --api-key "$WEB_EXT_API_KEY" \
             --api-secret "$WEB_EXT_API_SECRET" \
-            --id "moodline@shiki-01.github.io"
+            --upload-source-code "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-source.zip"
 
           signed_xpi=$(find firedox-dist -maxdepth 1 -name '*.xpi' ! -name "moodline-${{ steps.ref.outputs.tag }}.xpi" | head -n 1)
           if [ -n "$signed_xpi" ]; then
