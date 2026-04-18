@@ -18,8 +18,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
-      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+      AMO_JWT_ISSUER: ${{ secrets['AMO_JWT_ISSUER'] }}
+      AMO_JWT_SECRET: ${{ secrets['AMO_JWT_SECRET'] }}
 
     steps:
       - name: Resolve ref
