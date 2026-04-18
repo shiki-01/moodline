@@ -17,10 +17,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      AMO_JWT_ISSUER: ${{ secrets['AMO_JWT_ISSUER'] }}
-      AMO_JWT_SECRET: ${{ secrets['AMO_JWT_SECRET'] }}
-      AMO_SIGN_CHANNEL: ${{ vars.AMO_SIGN_CHANNEL || 'unlisted' }}
 
     steps:
       - name: Resolve ref
@@ -55,37 +51,20 @@ jobs:
         run: |
           node scripts/package-zip.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}.zip"
           node scripts/package-zip.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}.xpi"
-          node scripts/package-source.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-source.zip"
-
-      - name: Sign XPI on AMO (optional)
-        if: env.AMO_JWT_ISSUER != '' && env.AMO_JWT_SECRET != ''
-        env:
-          WEB_EXT_API_KEY: ${{ env.AMO_JWT_ISSUER }}
-          WEB_EXT_API_SECRET: ${{ env.AMO_JWT_SECRET }}
-          WEB_EXT_CHANNEL: ${{ env.AMO_SIGN_CHANNEL }}
-        run: |
-          channel="$(echo "$WEB_EXT_CHANNEL" | tr '[:upper:]' '[:lower:]')"
-          if [ "$channel" != "listed" ] && [ "$channel" != "unlisted" ]; then
-            channel="unlisted"
-          fi
-
-          npx --yes web-ext sign \
-            --source-dir dist \
-            --artifacts-dir firedox-dist \
-            --channel "$channel" \
-            --api-key "$WEB_EXT_API_KEY" \
-            --api-secret "$WEB_EXT_API_SECRET" \
-            --upload-source-code "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-source.zip"
-
-          signed_xpi=$(find firedox-dist -maxdepth 1 -name '*.xpi' ! -name "moodline-${{ steps.ref.outputs.tag }}.xpi" | head -n 1)
-          if [ -n "$signed_xpi" ]; then
-            cp "$signed_xpi" "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-signed.xpi"
-          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ref.outputs.tag }}
           generate_release_notes: true
+          append_body: true
+          body: |
+            ## Assets
+            - `moodline-${{ steps.ref.outputs.tag }}.zip`: Chrome 向けパッケージ
+            - `moodline-${{ steps.ref.outputs.tag }}.xpi`: Firefox 向けパッケージ
+
+            詳細な導入・ビルド手順は README を参照してください。
+            https://github.com/${{ github.repository }}/blob/${{ steps.ref.outputs.tag }}/README.md
           files: |
-            firedox-dist/*
+            firedox-dist/moodline-${{ steps.ref.outputs.tag }}.zip
+            firedox-dist/moodline-${{ steps.ref.outputs.tag }}.xpi

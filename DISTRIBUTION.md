@@ -17,22 +17,8 @@ GitHub Release には次のアセットが添付されます。
 
 - `moodline-<tag>.zip`（配布用 ZIP）
 - `moodline-<tag>.xpi`（unsigned XPI）
-- `moodline-<tag>-source.zip`（ソース提出用 ZIP）
 
-さらに GitHub Secrets に次を設定すると、AMO 署名済み XPI も自動で添付されます。
-
-- `AMO_JWT_ISSUER`
-- `AMO_JWT_SECRET`
-
-オプションで GitHub Variables に `AMO_SIGN_CHANNEL` を設定できます。
-
-- 既定値: `unlisted`
-- 指定可能値: `unlisted` / `listed`
-
-`listed` を使う場合は AMO 側でライセンスなどのメタデータ要件を満たしている必要があります。
-メタデータが不足していると `version.license is required for listed versions` で署名が失敗します。
-
-署名済みファイル名: `moodline-<tag>-signed.xpi`
+リリース本文には、各アセットの対応ブラウザ（Chrome / Firefox）と README へのリンクを自動で追記します。
 
 ### 手動で流れだけ確認する場合
 
