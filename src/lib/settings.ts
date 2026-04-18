@@ -1,3 +1,5 @@
+import { webext } from '$lib/webext'
+
 export type ColorMode = 'by-assignment' | 'by-status'
 
 export interface StatusColors {
@@ -29,7 +31,7 @@ function normalizeOpacity(v: unknown): number {
 }
 
 export async function loadSettings(): Promise<MoodlineSettings> {
-  const stored = await chrome.storage.sync.get('moodlineSettings')
+  const stored = await webext.storage.sync.get('moodlineSettings')
   if (!stored.moodlineSettings) return DEFAULT_SETTINGS
 
   const merged = { ...DEFAULT_SETTINGS, ...stored.moodlineSettings }
@@ -41,7 +43,7 @@ export async function loadSettings(): Promise<MoodlineSettings> {
 }
 
 export async function saveSettings(s: MoodlineSettings): Promise<void> {
-  await chrome.storage.sync.set({
+  await webext.storage.sync.set({
     moodlineSettings: {
       ...s,
       barOpacity: normalizeOpacity(s.barOpacity),

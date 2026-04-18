@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import type { SerializableTimeline } from '$lib/types'
   import { loadSettings, saveSettings, DEFAULT_SETTINGS } from '$lib/settings'
+  import { webext } from '$lib/webext'
   import type { MoodlineSettings } from '$lib/settings'
 
   const COMPONENT_LABELS: Record<string, string> = {
@@ -37,9 +38,9 @@
 
     // タイムラインを取る
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tab?.id) { status = 'no-moodle'; return }
-      const resp = await chrome.tabs.sendMessage(tab.id, { type: 'GET_TIMELINES' }).catch(() => null)
+      const [activeTab] = await webext.tabs.query({ active: true, currentWindow: true })
+      if (activeTab?.id == null) { status = 'no-moodle'; return }
+      const resp = await webext.tabs.sendMessage(activeTab.id, { type: 'GET_TIMELINES' }).catch(() => null)
       if (!resp) { status = 'no-moodle'; return }
       timelines = resp.timelines ?? []
       status = timelines.length ? 'ok' : 'no-data'

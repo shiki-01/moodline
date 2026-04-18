@@ -2,6 +2,7 @@ import { parseDayCells, parseCalendarEvents, buildTimelines, setCompletionMap } 
 import { injectStyles, renderTimelines, enhanceUpcomingEvents, redrawOverlay } from '$lib/overlay'
 import { loadSettings, DEFAULT_SETTINGS } from '$lib/settings'
 import { fetchCompletionMap } from '$lib/moodle-api'
+import { webext } from '$lib/webext'
 import type { MoodlineSettings } from '$lib/settings'
 import type { SerializableTimeline, AssignmentTimeline } from '$lib/types'
 
@@ -100,13 +101,13 @@ async function fetchAndRender(): Promise<void> {
 
 init()
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+webext.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'GET_TIMELINES') sendResponse({ timelines: cachedTimelines })
   return true
 })
 
 // 設定変更 → 即再描画
-chrome.storage.onChanged.addListener((changes, area) => {
+webext.storage.onChanged.addListener((changes, area) => {
   if (area !== 'sync' || !changes.moodlineSettings) return
   loadSettings().then(s => {
     currentSettings = s

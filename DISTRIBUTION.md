@@ -13,6 +13,19 @@
 3. `npm run release` を実行する
 4. GitHub Actions が `dist` を ZIP 化し、GitHub Release を作成する
 
+GitHub Release には次のアセットが添付されます。
+
+- `moodline-<tag>.zip`（配布用 ZIP）
+- `moodline-<tag>.xpi`（unsigned XPI）
+- `moodline-<tag>-source.zip`（ソース提出用 ZIP）
+
+さらに GitHub Secrets に次を設定すると、AMO 署名済み XPI も自動で添付されます。
+
+- `AMO_JWT_ISSUER`
+- `AMO_JWT_SECRET`
+
+署名済みファイル名: `moodline-<tag>-signed.xpi`
+
 ### 手動で流れだけ確認する場合
 
 ```bash
@@ -44,18 +57,33 @@ npm run dev
 配布用ファイルは `npm run build` で `dist/` に出力されます。
 
 ```bash
-npm run build
-cd dist
-zip -r ../moodline-v0.1.0.zip .
+npm run build:zip
 ```
 
 配布物は `manifest.json` が直下にあるフォルダ構成になっています。
+
+AMO へ提出する ZIP は、`dist/` ディレクトリそのものではなく中身を圧縮してください。
+`npm run package:zip` はこの条件を満たす ZIP（`dist.zip`）を作成します。
+
+### 動作確認（手動読み込み）
+
+#### Chrome
+
+1. `chrome://extensions` を開く
+2. 「デベロッパーモード」を有効化する
+3. 「パッケージ化されていない拡張機能を読み込む」で、`dist/` を選択する
+
+#### Firefox
+
+1. `about:debugging#/runtime/this-firefox` を開く
+2. 「一時的なアドオンを読み込む」を押す
+3. `dist/manifest.json` を選択する
 
 ## トラブルシュート
 
 ### 画面に反映されない
 
-- 拡張機能ページで再読み込みしてください
+- 拡張機能管理ページで再読み込みしてください
 - Moodle のページを更新してください
 - 古い `dist/content.js` が残っていると動作がずれることがあります
 

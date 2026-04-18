@@ -47,10 +47,30 @@ jobs:
       - name: Build extension
         run: npm run build
 
-      - name: Package zip
+      - name: Package release assets
         run: |
-          cd dist
-          zip -r "../moodline-${{ steps.ref.outputs.tag }}.zip" .
+          node scripts/package-zip.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}.zip"
+          node scripts/package-zip.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}.xpi"
+          node scripts/package-source.mjs "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-source.zip"
+
+      - name: Sign XPI on AMO (optional)
+        if: secrets.AMO_JWT_ISSUER != '' && secrets.AMO_JWT_SECRET != ''
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: |
+          npx --yes web-ext sign \
+            --source-dir dist \
+            --artifacts-dir firedox-dist \
+            --channel listed \
+            --api-key "$WEB_EXT_API_KEY" \
+            --api-secret "$WEB_EXT_API_SECRET" \
+            --id "moodline@shiki-01.github.io"
+
+          signed_xpi=$(find firedox-dist -maxdepth 1 -name '*.xpi' ! -name "moodline-${{ steps.ref.outputs.tag }}.xpi" | head -n 1)
+          if [ -n "$signed_xpi" ]; then
+            cp "$signed_xpi" "firedox-dist/moodline-${{ steps.ref.outputs.tag }}-signed.xpi"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -58,4 +78,4 @@ jobs:
           tag_name: ${{ steps.ref.outputs.tag }}
           generate_release_notes: true
           files: |
-            moodline-${{ steps.ref.outputs.tag }}.zip
+            firedox-dist/*
