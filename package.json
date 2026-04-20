@@ -1,12 +1,14 @@
 {
   "name": "moodline",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite build --watch",
     "build": "node scripts/sync-manifest-version.mjs && tsx build.ts",
+    "prepackage:zip": "npm run build",
     "package:zip": "node scripts/package-zip.mjs",
+    "prepackage:xpi": "npm run build",
     "package:xpi": "node scripts/package-zip.mjs dist.xpi",
     "package:source": "node scripts/package-source.mjs",
     "build:zip": "npm run build && npm run package:zip",

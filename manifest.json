@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Moodline",
-  "version": "0.2.2",
+  "version": "0.2.5",
   "description": "Moodle カレンダーに課題タイムラインを視覚化",
   "permissions": ["storage"],
   "content_scripts": [
