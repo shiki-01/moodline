@@ -1,15 +1,16 @@
 import { parseDayCells, parseCalendarEvents, buildTimelines, setCompletionMap } from '$lib/parser'
 import { injectStyles, renderTimelines, enhanceUpcomingEvents, redrawOverlay } from '$lib/overlay'
 import { loadSettings, DEFAULT_SETTINGS } from '$lib/settings'
-import { fetchCompletionMap } from '$lib/moodle-api'
+import { fetchCompletionMap, fetchCalendarRangeHints } from '$lib/moodle-api'
 import { webext } from '$lib/webext'
 import type { MoodlineSettings } from '$lib/settings'
-import type { SerializableTimeline, AssignmentTimeline } from '$lib/types'
+import type { SerializableTimeline, AssignmentTimeline, CalendarRangeHint } from '$lib/types'
 
 let cachedTimelines: SerializableTimeline[] = []
 let lastCellKey = ''
 let currentSettings: MoodlineSettings = DEFAULT_SETTINGS
 let suppressObserverUntil = 0
+let cachedRangeHints = new Map<string, CalendarRangeHint>()
 
 function suppressObserver(ms = 700): void {
   suppressObserverUntil = Date.now() + ms
@@ -22,13 +23,49 @@ function cellKey(cells: ReturnType<typeof parseDayCells>): string {
 function toSerializable(tl: AssignmentTimeline): SerializableTimeline {
   return {
     id: tl.id,
+    timelineKey: tl.timelineKey,
     name: tl.name,
     component: tl.component,
     color: tl.color,
     completion: tl.completion,
+    hidden: false,
     openTs: tl.openEvent?.timestamp,
     closeTs: tl.closeEvent?.timestamp,
     dueTs: tl.dueEvent?.timestamp,
+  }
+}
+
+function getEffectiveRange(
+  tl: AssignmentTimeline,
+  minVisibleTs: number,
+  maxVisibleTs: number,
+): { startTs?: number; endTs?: number } {
+  const isDueOnly = !!tl.isDueOnly
+  const startTs = isDueOnly
+    ? tl.dueEvent?.timestamp
+    : (tl.openEvent?.timestamp ?? (tl.extendsBeforeView ? minVisibleTs : tl.dueEvent?.timestamp))
+  const endTs = isDueOnly
+    ? tl.dueEvent?.timestamp
+    : (tl.closeEvent?.timestamp ?? tl.dueEvent?.timestamp ?? (tl.extendsAfterView ? maxVisibleTs : tl.openEvent?.timestamp))
+  return { startTs, endTs }
+}
+
+function isTimelineHidden(tl: AssignmentTimeline): boolean {
+  return currentSettings.hiddenTimelineKeys.includes(tl.timelineKey)
+}
+
+function toSerializableForPopup(
+  tl: AssignmentTimeline,
+  minVisibleTs: number,
+  maxVisibleTs: number,
+): SerializableTimeline {
+  const base = toSerializable(tl)
+  const { startTs, endTs } = getEffectiveRange(tl, minVisibleTs, maxVisibleTs)
+  return {
+    ...base,
+    hidden: isTimelineHidden(tl),
+    displayStartTs: startTs,
+    displayEndTs: endTs,
   }
 }
 
@@ -45,13 +82,17 @@ function render(): void {
   const events = parseCalendarEvents()
   if (!events.length) return
 
-  const timelines = buildTimelines(events)
-  cachedTimelines = timelines.map(toSerializable)
+  const minVisibleTs = Math.min(...cells.map(c => c.timestamp))
+  const maxVisibleTs = Math.max(...cells.map(c => c.timestamp))
+
+  const allTimelines = buildTimelines(events, cachedRangeHints)
+  const visibleTimelines = allTimelines.filter(tl => !isTimelineHidden(tl))
+  cachedTimelines = allTimelines.map(tl => toSerializableForPopup(tl, minVisibleTs, maxVisibleTs))
 
   // Moodline 自身の DOM 更新で observer が再描画ループしないよう短時間抑止
   suppressObserver()
-  renderTimelines(timelines, cells, currentSettings)
-  enhanceUpcomingEvents(timelines)
+  renderTimelines(visibleTimelines, cells, currentSettings)
+  enhanceUpcomingEvents(visibleTimelines)
 }
 
 async function init(): Promise<void> {
@@ -80,20 +121,28 @@ async function fetchAndRender(): Promise<void> {
 
   if (!knownCmids.size) return
 
-  const completionMap = await fetchCompletionMap(knownCmids).catch(e => {
-    const message = e instanceof Error ? e.message : String(e)
-    const isDisabledWebservice = /ウェブサービスを利用できません|存在しないか、無効にされています/i.test(message)
-    if (isDisabledWebservice) {
-      console.info('[Moodline] completion web service unavailable, fallback used')
-    } else {
-      console.warn('[Moodline] completion API failed:', e)
-    }
-    return new Map<string, import('$lib/types').CompletionStatus>()
-  })
+  const [completionMap, rangeHints] = await Promise.all([
+    fetchCompletionMap(knownCmids).catch(e => {
+      const message = e instanceof Error ? e.message : String(e)
+      const isDisabledWebservice = /ウェブサービスを利用できません|存在しないか、無効にされています/i.test(message)
+      if (isDisabledWebservice) {
+        console.info('[Moodline] completion web service unavailable, fallback used')
+      } else {
+        console.warn('[Moodline] completion API failed:', e)
+      }
+      return new Map<string, import('$lib/types').CompletionStatus>()
+    }),
+    fetchCalendarRangeHints(knownCmids).catch(e => {
+      console.info('[Moodline] calendar range hints unavailable, fallback to visible events:', e)
+      return new Map<string, CalendarRangeHint>()
+    }),
+  ])
 
-  if (!completionMap.size) return
+  if (completionMap.size) setCompletionMap(completionMap)
+  if (rangeHints.size) cachedRangeHints = rangeHints
 
-  setCompletionMap(completionMap)
+  if (!completionMap.size && !rangeHints.size) return
+
   // 完了状態を反映して再描画（セルキーをリセットして強制）
   lastCellKey = ''
   render()
@@ -112,7 +161,8 @@ webext.storage.onChanged.addListener((changes, area) => {
   loadSettings().then(s => {
     currentSettings = s
     suppressObserver()
-    redrawOverlay(s)
+    lastCellKey = ''
+    render()
   })
 })
 

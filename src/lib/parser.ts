@@ -1,4 +1,4 @@
-import type { CalendarEvent, AssignmentTimeline, DayCell, EventType, CompletionStatus } from './types'
+import type { CalendarEvent, AssignmentTimeline, DayCell, EventType, CompletionStatus, CalendarRangeHint } from './types'
 import { getColor } from './colors'
 
 // cmid → completion status (API から取得したもの)
@@ -30,6 +30,15 @@ function detectEventType(attrType: string, name: string): EventType {
 function resolveCompletion(cmid: string | null): CompletionStatus {
   if (!cmid) return 'unknown'
   return _completionMap.get(cmid) ?? 'unknown'
+}
+
+function normalizeTimelineName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function buildTimelineKey(cmid: string | null, component: string, name: string): string {
+  if (cmid && /^\d+$/.test(cmid)) return `cmid:${cmid}`
+  return `name:${component}:${normalizeTimelineName(name)}`
 }
 
 export function parseDayCells(): DayCell[] {
@@ -78,7 +87,26 @@ export function parseCalendarEvents(): CalendarEvent[] {
   return events
 }
 
-export function buildTimelines(events: CalendarEvent[]): AssignmentTimeline[] {
+function buildSyntheticEvent(
+  cmid: string,
+  base: CalendarEvent,
+  type: EventType,
+  timestamp: number,
+): CalendarEvent {
+  return {
+    id: `api-${cmid}-${type}-${timestamp}`,
+    name: base.name,
+    normalizedName: cmid,
+    type,
+    component: base.component,
+    timestamp,
+  }
+}
+
+export function buildTimelines(
+  events: CalendarEvent[],
+  rangeHints?: Map<string, CalendarRangeHint>,
+): AssignmentTimeline[] {
   // cmid（normalizedName に格納済み）でグループ化
   const groups = new Map<string, CalendarEvent[]>()
   for (const ev of events) {
@@ -91,22 +119,32 @@ export function buildTimelines(events: CalendarEvent[]): AssignmentTimeline[] {
   let colorIndex = 0
 
   for (const [, group] of groups) {
-    const openEv = group.find(e => e.type === 'open')
-    const dueEv = group.find(e => e.type === 'due')
-    const closeEv = group.find(e => e.type === 'close')
+    const cmid = group[0]?.normalizedName ?? ''
+    const hint = cmid ? rangeHints?.get(cmid) : undefined
 
-    const hasRange = openEv && (closeEv || dueEv)
+    const openEvDom = group.find(e => e.type === 'open')
+    const dueEvDom = group.find(e => e.type === 'due')
+    const closeEvDom = group.find(e => e.type === 'close')
+
+    const representative = openEvDom ?? closeEvDom ?? dueEvDom
+    if (!representative) continue
+
+    const openEv = openEvDom ?? (hint?.openTs ? buildSyntheticEvent(cmid, representative, 'open', hint.openTs) : undefined)
+    const dueEv = dueEvDom ?? (hint?.dueTs ? buildSyntheticEvent(cmid, representative, 'due', hint.dueTs) : undefined)
+    const closeEv = closeEvDom ?? (hint?.closeTs ? buildSyntheticEvent(cmid, representative, 'close', hint.closeTs) : undefined)
+
+    const hasRange = !!openEv && !!(closeEv || dueEv)
     const isDueOnly = !openEv && dueEv
+    const extendsAfterView = !!openEv && !closeEv && !dueEv
+    const extendsBeforeView = !openEv && !!closeEv
 
-    if (!hasRange && !isDueOnly) continue
+    if (!hasRange && !isDueOnly && !extendsAfterView && !extendsBeforeView) continue
 
-    // cmid は normalizedName に格納済み (extractCmid で取得したもの)
-    const cmid = (openEv ?? closeEv ?? dueEv)!.normalizedName
     const completion = resolveCompletion(cmid)
-    const representative = openEv ?? closeEv ?? dueEv!
 
     timelines.push({
       id: `tl-${colorIndex}`,
+      timelineKey: buildTimelineKey(cmid || null, representative.component, representative.name),
       name: representative.name
         // 「〇〇 の受験可能期間の終了」→「〇〇」のようにサフィックスを除去して表示名を整える
         .replace(/\s*(の受験可能期間の終了|の受験可能期間の開始|が開始されます|が終了します|の期限|opens?|closes?|is due)\s*$/i, '')
@@ -116,6 +154,9 @@ export function buildTimelines(events: CalendarEvent[]): AssignmentTimeline[] {
       openEvent: openEv,
       dueEvent: dueEv,
       closeEvent: closeEv,
+      extendsBeforeView,
+      extendsAfterView,
+      isDueOnly: !!isDueOnly,
       completion,
     })
     colorIndex++

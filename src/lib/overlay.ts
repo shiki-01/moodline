@@ -14,6 +14,18 @@ const BAR_GAP = 3
 const BAR_BOTTOM_PAD = 4
 const START_INSET = 5
 const END_INSET = 5
+const CELL_EXTRA_CONTENT_PAD = 8
+const CELL_OVERRIDE_ATTR = 'data-moodline-row-overridden'
+const CUSTOM_LIST_CLASS = 'moodline-day-list'
+const CUSTOM_ITEM_CLASS = 'moodline-day-item'
+
+const MARK_NATIVE_UL_DISPLAY = 'data-moodline-native-ul-display'
+const MARK_DAY_CONTENT_OVERFLOW = 'data-moodline-day-content-overflow'
+const MARK_CELL_OVERFLOW = 'data-moodline-cell-overflow'
+const MARK_WRAPPER_OVERFLOW = 'data-moodline-wrapper-overflow'
+const MARK_TABLE_OVERFLOW = 'data-moodline-table-overflow'
+const MARK_DAY_CONTENT_POSITION = 'data-moodline-day-content-position'
+const MARK_DAY_CONTENT_ZINDEX = 'data-moodline-day-content-zindex'
 
 // ─── Tooltip (position:fixed、body 直下に置くので再生成の影響ゼロ) ───────────
 function getTooltip(): HTMLDivElement {
@@ -111,6 +123,50 @@ export function injectStyles(): void {
       margin-left: 5px; vertical-align: middle;
       color: #fff;
     }
+
+    .${CUSTOM_LIST_CLASS} {
+      list-style: none;
+      margin: 4px 0 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      position: relative;
+      z-index: 80;
+      pointer-events: auto;
+    }
+    .${CUSTOM_ITEM_CLASS} {
+      margin: 0;
+      padding: 2px 4px;
+      border-left: 3px solid #64748b;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.9);
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+    }
+    .${CUSTOM_ITEM_CLASS} a {
+      color: inherit;
+      text-decoration: none;
+      display: inline-block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .${CUSTOM_ITEM_CLASS} a:hover { text-decoration: underline; }
+    .${CUSTOM_ITEM_CLASS} .moodline-day-badge {
+      margin-left: 4px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      color: #fff;
+      vertical-align: middle;
+    }
   `
   document.head.appendChild(style)
 }
@@ -167,6 +223,183 @@ function groupByRow(cells: DayCell[]): Map<HTMLTableRowElement, DayCell[]> {
   return map
 }
 
+function resetRowOverrides(cells: DayCell[]): void {
+  cells.forEach(cell => {
+    if (!cell.element.hasAttribute(CELL_OVERRIDE_ATTR)) return
+    cell.element.style.removeProperty('padding-bottom')
+    cell.element.style.removeProperty('min-height')
+    cell.element.style.removeProperty('height')
+    cell.element.removeAttribute(CELL_OVERRIDE_ATTR)
+  })
+}
+
+function setInlineOverride(el: HTMLElement, prop: string, value: string, marker: string): void {
+  if (!el.hasAttribute(marker)) {
+    el.setAttribute(marker, '1')
+    el.setAttribute(`${marker}-prev`, el.style.getPropertyValue(prop))
+  }
+  el.style.setProperty(prop, value)
+}
+
+function restoreInlineOverride(el: HTMLElement, prop: string, marker: string): void {
+  if (!el.hasAttribute(marker)) return
+  const prev = el.getAttribute(`${marker}-prev`) ?? ''
+  if (prev) el.style.setProperty(prop, prev)
+  else el.style.removeProperty(prop)
+  el.removeAttribute(marker)
+  el.removeAttribute(`${marker}-prev`)
+}
+
+function resetCalendarContentOverrides(cells: DayCell[]): void {
+  cells.forEach(cell => {
+    cell.element.querySelectorAll<HTMLElement>(`.${CUSTOM_LIST_CLASS}`).forEach(el => el.remove())
+
+    cell.element.querySelectorAll<HTMLElement>(`[${MARK_NATIVE_UL_DISPLAY}]`).forEach(el => {
+      restoreInlineOverride(el, 'display', MARK_NATIVE_UL_DISPLAY)
+    })
+    cell.element.querySelectorAll<HTMLElement>(`[${MARK_DAY_CONTENT_OVERFLOW}]`).forEach(el => {
+      restoreInlineOverride(el, 'overflow', MARK_DAY_CONTENT_OVERFLOW)
+    })
+    cell.element.querySelectorAll<HTMLElement>(`[${MARK_DAY_CONTENT_POSITION}]`).forEach(el => {
+      restoreInlineOverride(el, 'position', MARK_DAY_CONTENT_POSITION)
+    })
+    cell.element.querySelectorAll<HTMLElement>(`[${MARK_DAY_CONTENT_ZINDEX}]`).forEach(el => {
+      restoreInlineOverride(el, 'z-index', MARK_DAY_CONTENT_ZINDEX)
+    })
+
+    restoreInlineOverride(cell.element, 'overflow', MARK_CELL_OVERFLOW)
+  })
+}
+
+function resetContainerOverflowOverrides(wrapper: HTMLElement): void {
+  restoreInlineOverride(wrapper, 'overflow', MARK_WRAPPER_OVERFLOW)
+  const table = wrapper.querySelector<HTMLElement>('table.calendarmonth')
+  if (table) restoreInlineOverride(table, 'overflow', MARK_TABLE_OVERFLOW)
+}
+
+function extractCmid(href: string): string | null {
+  try {
+    return new URL(href).searchParams.get('id')
+  } catch {
+    return null
+  }
+}
+
+function openLinkLikeOriginal(anchor: HTMLAnchorElement, event: MouseEvent): void {
+  const href = anchor.href
+  if (!href) return
+
+  if (event.metaKey || event.ctrlKey || event.button === 1) {
+    window.open(href, '_blank', 'noopener')
+    return
+  }
+
+  if (event.shiftKey) {
+    window.open(href, '_blank')
+    return
+  }
+
+  window.location.href = href
+}
+
+function resolveEventListColor(tl: AssignmentTimeline | undefined, settings: MoodlineSettings): string {
+  if (!tl) return '#64748b'
+  if (settings.colorMode === 'by-status') {
+    return tl.completion === 'completed'
+      ? settings.statusColors.completed
+      : tl.completion === 'incomplete'
+        ? settings.statusColors.incomplete
+        : settings.statusColors.unknown
+  }
+  return tl.color
+}
+
+function applyCustomCalendarEventList(
+  timelines: AssignmentTimeline[],
+  cells: DayCell[],
+  settings: MoodlineSettings,
+  wrapper: HTMLElement,
+): void {
+  const timelineByCmid = new Map<string, AssignmentTimeline>()
+  for (const tl of timelines) {
+    const cmid = tl.openEvent?.normalizedName ?? tl.closeEvent?.normalizedName ?? tl.dueEvent?.normalizedName
+    if (cmid && /^\d+$/.test(cmid)) timelineByCmid.set(cmid, tl)
+  }
+
+  setInlineOverride(wrapper, 'overflow', 'visible', MARK_WRAPPER_OVERFLOW)
+  const table = wrapper.querySelector<HTMLElement>('table.calendarmonth')
+  if (table) setInlineOverride(table, 'overflow', 'visible', MARK_TABLE_OVERFLOW)
+
+  for (const cell of cells) {
+    const dayContent = cell.element.querySelector<HTMLElement>('[data-region="day-content"]')
+    if (!dayContent) continue
+
+    const sourceItems = dayContent.querySelectorAll<HTMLElement>('li[data-region="event-item"]')
+    if (!sourceItems.length) continue
+
+    const nativeList = dayContent.querySelector<HTMLElement>('ul')
+    if (nativeList) setInlineOverride(nativeList, 'display', 'none', MARK_NATIVE_UL_DISPLAY)
+
+    setInlineOverride(dayContent, 'overflow', 'visible', MARK_DAY_CONTENT_OVERFLOW)
+    setInlineOverride(dayContent, 'position', 'relative', MARK_DAY_CONTENT_POSITION)
+    setInlineOverride(dayContent, 'z-index', '80', MARK_DAY_CONTENT_ZINDEX)
+    setInlineOverride(cell.element, 'overflow', 'visible', MARK_CELL_OVERFLOW)
+
+    const list = document.createElement('ul')
+    list.className = CUSTOM_LIST_CLASS
+
+    sourceItems.forEach(item => {
+      const anchor = item.querySelector<HTMLAnchorElement>('a[data-action="view-event"]')
+      if (!anchor) return
+
+      const name = item.querySelector('.eventname, .event-name')?.textContent?.trim()
+        ?? anchor.title?.trim()
+        ?? anchor.textContent?.trim()
+        ?? ''
+      if (!name) return
+
+      const li = document.createElement('li')
+      li.className = CUSTOM_ITEM_CLASS
+
+      const cmid = extractCmid(anchor.href ?? '')
+      const tl = cmid ? timelineByCmid.get(cmid) : undefined
+      li.style.borderLeftColor = resolveEventListColor(tl, settings)
+
+      const link = anchor.cloneNode(true) as HTMLAnchorElement
+      link.textContent = name
+      link.className = anchor.className
+      link.dataset.action = anchor.dataset.action ?? 'view-event'
+
+      link.addEventListener('click', e => {
+        e.stopPropagation()
+        e.preventDefault()
+        openLinkLikeOriginal(link, e)
+      })
+
+      li.addEventListener('click', e => {
+        e.stopPropagation()
+        const target = e.target as HTMLElement
+        if (target.closest('a')) return
+        e.preventDefault()
+        openLinkLikeOriginal(link, e)
+      })
+
+      list.appendChild(li)
+      li.appendChild(link)
+
+      if (tl?.completion && tl.completion !== 'unknown') {
+        const badge = document.createElement('span')
+        badge.className = 'moodline-day-badge'
+        badge.textContent = tl.completion === 'completed' ? '完了' : '未完了'
+        badge.style.backgroundColor = tl.completion === 'completed' ? '#22c55e' : '#f59e0b'
+        li.appendChild(badge)
+      }
+    })
+
+    if (list.childElementCount > 0) dayContent.appendChild(list)
+  }
+}
+
 function getDaysBetween(startTs: number, endTs: number, cells: DayCell[]): DayCell[] {
   const s = Math.floor(startTs / 86400)
   const e = Math.floor(endTs / 86400)
@@ -220,7 +453,18 @@ function _renderOverlay(timelines: AssignmentTimeline[], cells: DayCell[], setti
   const wrapper = getWrapper()
   if (!wrapper) return
 
+  const minVisibleTs = Math.min(...cells.map(c => c.timestamp))
+  const maxVisibleTs = Math.max(...cells.map(c => c.timestamp))
+
   document.getElementById(OVERLAY_ID)?.remove()
+  resetRowOverrides(cells)
+  resetCalendarContentOverrides(cells)
+  resetContainerOverflowOverrides(wrapper)
+
+  if (settings.calendarEventDisplayMode === 'moodline') {
+    applyCustomCalendarEventList(timelines, cells, settings, wrapper)
+  }
+
   const overlay = document.createElement('div')
   overlay.id = OVERLAY_ID
   overlay.style.setProperty('--ml-base-opacity', String(settings.barOpacity))
@@ -229,15 +473,80 @@ function _renderOverlay(timelines: AssignmentTimeline[], cells: DayCell[], setti
   setupHoverSync(overlay)
 
   const wRect = wrapper.getBoundingClientRect()
+  const allRowGroups = groupByRow(cells)
+
+  const rowTimelineOrder = new Map<HTMLTableRowElement, string[]>()
+  const rowTimelineSet = new Map<HTMLTableRowElement, Set<string>>()
+  const timelineSegmentsByRow = new Map<string, Map<HTMLTableRowElement, DayCell[]>>()
+
+  timelines.forEach(tl => {
+    const isDueOnly = !!tl.isDueOnly
+    const startTs = isDueOnly
+      ? tl.dueEvent?.timestamp
+      : (tl.openEvent?.timestamp ?? (tl.extendsBeforeView ? minVisibleTs : tl.dueEvent?.timestamp))
+    const endTs = isDueOnly
+      ? tl.dueEvent?.timestamp
+      : (tl.closeEvent?.timestamp ?? tl.dueEvent?.timestamp ?? (tl.extendsAfterView ? maxVisibleTs : tl.openEvent?.timestamp))
+    if (!startTs || !endTs) return
+
+    const affected = getDaysBetween(startTs, endTs, cells)
+    if (!affected.length) return
+
+    const rowGroups = groupByRow(affected)
+    timelineSegmentsByRow.set(tl.id, rowGroups)
+
+    for (const [row] of rowGroups) {
+      if (!rowTimelineSet.has(row)) rowTimelineSet.set(row, new Set())
+      if (!rowTimelineOrder.has(row)) rowTimelineOrder.set(row, [])
+
+      const set = rowTimelineSet.get(row)!
+      if (!set.has(tl.id)) {
+        set.add(tl.id)
+        rowTimelineOrder.get(row)!.push(tl.id)
+      }
+    }
+  })
+
+  const rowLaneMap = new Map<HTMLTableRowElement, Map<string, number>>()
+  const rowLaneCount = new Map<HTMLTableRowElement, number>()
+  for (const [row, order] of rowTimelineOrder) {
+    const laneMap = new Map<string, number>()
+    order.forEach((id, idx) => laneMap.set(id, idx))
+    rowLaneMap.set(row, laneMap)
+    rowLaneCount.set(row, order.length)
+  }
+
+  for (const [row, rowCells] of allRowGroups) {
+    const laneCount = rowLaneCount.get(row) ?? 0
+    if (!laneCount) continue
+
+    const reserveBottom = laneCount * (BAR_H + BAR_GAP) + BAR_BOTTOM_PAD + CELL_EXTRA_CONTENT_PAD
+    for (const cell of rowCells) {
+      const currentPadBottom = Number.parseFloat(getComputedStyle(cell.element).paddingBottom || '0') || 0
+      if (reserveBottom > currentPadBottom) {
+        cell.element.style.paddingBottom = `${reserveBottom}px`
+      }
+      const currentHeight = cell.element.getBoundingClientRect().height
+      const minNeeded = Math.ceil(currentHeight + reserveBottom)
+      cell.element.style.minHeight = `${minNeeded}px`
+      cell.element.setAttribute(CELL_OVERRIDE_ATTR, '1')
+    }
+  }
 
   timelines.forEach((tl, tlIdx) => {
-    const startTs = tl.openEvent?.timestamp ?? tl.dueEvent?.timestamp
-    const endTs = tl.closeEvent?.timestamp ?? tl.dueEvent?.timestamp
+    const isDueOnly = !!tl.isDueOnly
+
+    const startTs = isDueOnly
+      ? tl.dueEvent?.timestamp
+      : (tl.openEvent?.timestamp ?? (tl.extendsBeforeView ? minVisibleTs : tl.dueEvent?.timestamp))
+    const endTs = isDueOnly
+      ? tl.dueEvent?.timestamp
+      : (tl.closeEvent?.timestamp ?? tl.dueEvent?.timestamp ?? (tl.extendsAfterView ? maxVisibleTs : tl.openEvent?.timestamp))
     if (!startTs || !endTs) return
 
     const color = resolveColor(tl, tlIdx, settings)
-    const affected = getDaysBetween(startTs, endTs, cells)
-    if (!affected.length) return
+    const rowGroups = timelineSegmentsByRow.get(tl.id)
+    if (!rowGroups || !rowGroups.size) return
 
     const startDay = Math.floor(startTs / 86400)
     const endDay = Math.floor(endTs / 86400)
@@ -248,27 +557,30 @@ function _renderOverlay(timelines: AssignmentTimeline[], cells: DayCell[], setti
     const tipText = tl.name + tipSuffix
 
     // 背景
-    affected.forEach(cell => {
-      const r = cell.element.getBoundingClientRect()
-      const bg = document.createElement('div')
-      bg.className = 'ml-bg'
-      bg.style.cssText = [
-        `left:${r.left - wRect.left}px`,
-        `top:${r.top - wRect.top}px`,
-        `width:${r.width}px`,
-        `height:${r.height}px`,
-      ].join(';')
-      overlay.appendChild(bg)
-    })
+    for (const [, rowCells] of rowGroups) {
+      rowCells.forEach(cell => {
+        const r = cell.element.getBoundingClientRect()
+        const bg = document.createElement('div')
+        bg.className = 'ml-bg'
+        bg.style.cssText = [
+          `left:${r.left - wRect.left}px`,
+          `top:${r.top - wRect.top}px`,
+          `width:${r.width}px`,
+          `height:${r.height}px`,
+        ].join(';')
+        overlay.appendChild(bg)
+      })
+    }
 
     // バー (1行 = 1セグメント)
-    const yOffset = tlIdx * (BAR_H + BAR_GAP) + BAR_BOTTOM_PAD
-    const rowGroups = groupByRow(affected)
 
-    for (const [, rowCells] of rowGroups) {
+    for (const [row, rowCells] of rowGroups) {
       const sorted = [...rowCells].sort((a, b) => a.timestamp - b.timestamp)
       const first = sorted[0]
       const last = sorted[sorted.length - 1]
+
+      const lane = rowLaneMap.get(row)?.get(tl.id) ?? tlIdx
+      const yOffset = lane * (BAR_H + BAR_GAP) + BAR_BOTTOM_PAD
 
       const isStart = Math.floor(first.timestamp / 86400) === startDay
       const isEnd = Math.floor(last.timestamp / 86400) === endDay

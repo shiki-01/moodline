@@ -22,8 +22,20 @@
     const d = new Date(ts * 1000)
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
-  function startTs(tl: SerializableTimeline) { return tl.openTs ?? tl.dueTs }
-  function endTs(tl: SerializableTimeline)   { return tl.closeTs ?? tl.dueTs }
+  function startTs(tl: SerializableTimeline) { return tl.displayStartTs ?? tl.openTs ?? tl.dueTs }
+  function endTs(tl: SerializableTimeline)   { return tl.displayEndTs ?? tl.closeTs ?? tl.dueTs }
+
+  function isHidden(tl: SerializableTimeline): boolean {
+    return settings.hiddenTimelineKeys.includes(tl.timelineKey)
+  }
+
+  async function toggleTimeline(tl: SerializableTimeline, visible: boolean) {
+    const set = new Set(settings.hiddenTimelineKeys)
+    if (visible) set.delete(tl.timelineKey)
+    else set.add(tl.timelineKey)
+    settings.hiddenTimelineKeys = [...set]
+    await saveSettings(settings)
+  }
 
   async function onSave() {
     await saveSettings(settings)
@@ -99,6 +111,14 @@
                 <span class="sep">·</span>
                 <span class="card-dates">{fmt(startTs(tl))} → {fmt(endTs(tl))}</span>
               </div>
+              <label class="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={!isHidden(tl)}
+                  onchange={e => toggleTimeline(tl, (e.target as HTMLInputElement).checked)}
+                />
+                <span>{isHidden(tl) ? '非表示' : '表示中'}</span>
+              </label>
               <div class="bar-bg" style="background:{barColor}22">
                 <div class="bar-fill" style="background:{barColor}"></div>
               </div>
@@ -178,6 +198,24 @@
         <p class="opacity-note">ホバー時は常に 1.00 で表示されます</p>
       </div>
 
+      <div class="setting-group">
+        <p class="setting-label">カレンダーイベント表示</p>
+        <div class="radio-group">
+          <label class="radio">
+            <input type="radio" name="calendar-mode" value="moodline"
+              checked={settings.calendarEventDisplayMode === 'moodline'}
+              onchange={() => settings.calendarEventDisplayMode = 'moodline'} />
+            <span>拡張表示（全件表示）</span>
+          </label>
+          <label class="radio">
+            <input type="radio" name="calendar-mode" value="native"
+              checked={settings.calendarEventDisplayMode === 'native'}
+              onchange={() => settings.calendarEventDisplayMode = 'native'} />
+            <span>標準表示（Moodleそのまま）</span>
+          </label>
+        </div>
+      </div>
+
       <button class="save-btn" onclick={onSave}>
         {saved ? '保存しました ✓' : '設定を保存'}
       </button>
@@ -241,6 +279,19 @@
   .card-dates { font-size:10px;color:#666; }
   .bar-bg { margin-top:6px;height:4px;border-radius:2px;width:100%; }
   .bar-fill { height:4px;border-radius:2px;width:100%; }
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 11px;
+    color: #555;
+  }
+  .toggle-row input {
+    width: 13px;
+    height: 13px;
+    accent-color: #2563eb;
+  }
 
   /* settings */
   .setting-group { margin-bottom:14px; }
