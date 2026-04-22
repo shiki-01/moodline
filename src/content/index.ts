@@ -11,6 +11,7 @@ let lastCellKey = ''
 let currentSettings: MoodlineSettings = DEFAULT_SETTINGS
 let suppressObserverUntil = 0
 let cachedRangeHints = new Map<string, CalendarRangeHint>()
+let isFetching = false
 
 function suppressObserver(ms = 700): void {
   suppressObserverUntil = Date.now() + ms
@@ -109,43 +110,50 @@ async function init(): Promise<void> {
 }
 
 async function fetchAndRender(): Promise<void> {
-  render() // まず即描画（完了状態なし）
+  if (isFetching) return
+  isFetching = true
 
-  // カレンダーイベントから cmid を収集
-  const events = parseCalendarEvents()
-  const knownCmids = new Set(
-    events
-      .map(e => e.normalizedName) // normalizedName = cmid (extractCmid の結果)
-      .filter(v => /^\d+$/.test(v)) // 数字のみ = cmid
-  )
+  try {
+    render() // まず即描画（完了状態なし）
 
-  if (!knownCmids.size) return
+    // カレンダーイベントから cmid を収集
+    const events = parseCalendarEvents()
+    const knownCmids = new Set(
+      events
+        .map(e => e.normalizedName) // normalizedName = cmid (extractCmid の結果)
+        .filter(v => /^\d+$/.test(v)) // 数字のみ = cmid
+    )
 
-  const [completionMap, rangeHints] = await Promise.all([
-    fetchCompletionMap(knownCmids).catch(e => {
-      const message = e instanceof Error ? e.message : String(e)
-      const isDisabledWebservice = /ウェブサービスを利用できません|存在しないか、無効にされています/i.test(message)
-      if (isDisabledWebservice) {
-        console.info('[Moodline] completion web service unavailable, fallback used')
-      } else {
-        console.warn('[Moodline] completion API failed:', e)
-      }
-      return new Map<string, import('$lib/types').CompletionStatus>()
-    }),
-    fetchCalendarRangeHints(knownCmids).catch(e => {
-      console.info('[Moodline] calendar range hints unavailable, fallback to visible events:', e)
-      return new Map<string, CalendarRangeHint>()
-    }),
-  ])
+    if (!knownCmids.size) return
 
-  if (completionMap.size) setCompletionMap(completionMap)
-  if (rangeHints.size) cachedRangeHints = rangeHints
+    const [completionMap, rangeHints] = await Promise.all([
+      fetchCompletionMap(knownCmids).catch(e => {
+        const message = e instanceof Error ? e.message : String(e)
+        const isDisabledWebservice = /ウェブサービスを利用できません|存在しないか、無効にされています/i.test(message)
+        if (isDisabledWebservice) {
+          console.info('[Moodline] completion web service unavailable, fallback used')
+        } else {
+          console.warn('[Moodline] completion API failed:', e)
+        }
+        return new Map<string, import('$lib/types').CompletionStatus>()
+      }),
+      fetchCalendarRangeHints(knownCmids).catch(e => {
+        console.info('[Moodline] calendar range hints unavailable, fallback to visible events:', e)
+        return new Map<string, CalendarRangeHint>()
+      }),
+    ])
 
-  if (!completionMap.size && !rangeHints.size) return
+    if (completionMap.size) setCompletionMap(completionMap)
+    if (rangeHints.size) cachedRangeHints = rangeHints
 
-  // 完了状態を反映して再描画（セルキーをリセットして強制）
-  lastCellKey = ''
-  render()
+    if (!completionMap.size && !rangeHints.size) return
+
+    // 完了状態を反映して再描画（セルキーをリセットして強制）
+    lastCellKey = ''
+    render()
+  } finally {
+    isFetching = false
+  }
 }
 
 init()
@@ -208,9 +216,18 @@ const observer = new MutationObserver(mutations => {
       el.classList.remove('moodline-enhanced')
       el.querySelector('.moodline-upcoming-badge')?.remove()
     })
-    // セルキーをリセットして強制再描画
-    lastCellKey = ''
-    render()
+
+    const newKey = cellKey(parseDayCells())
+    if (newKey && newKey !== lastCellKey) {
+      // 月が切り替わった → キャッシュをリセットして API 再取得
+      cachedRangeHints = new Map()
+      setCompletionMap(new Map())
+      lastCellKey = ''
+      fetchAndRender()
+    } else {
+      lastCellKey = ''
+      render()
+    }
   }, 300)
 })
 
