@@ -118,53 +118,99 @@ function getVisibleCalendarTimeRange(): { from: number; to: number } | null {
   return { from: min - 86400, to: max + 86400 }
 }
 
-async function detectFromActionEventsApi(knownCmids: Set<string>): Promise<Map<string, CompletionStatus> | null> {
-  const auth = getServiceUrlAndSesskey()
-  if (!auth) return null
-
-  const range = getVisibleCalendarTimeRange()
-
-  const req = [{
-    index: 0,
-    methodname: 'core_calendar_get_action_events_by_timesort',
-    args: {
-      limitnum: 50,
-      limittononsuspendedevents: true,
-      ...(range ? { timesortfrom: range.from, timesortto: range.to } : {}),
-    },
-  }]
-
+async function fetchActionEventCmids(
+  auth: { serviceUrl: string; sesskey: string },
+  from: number,
+  to: number,
+): Promise<Set<string>> {
   const url = new URL(auth.serviceUrl)
   url.searchParams.set('sesskey', auth.sesskey)
 
-  const res = await fetch(url.toString(), {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
+  const allCmids = new Set<string>()
+  // Moodle の limitnum 上限は 50。aftereventid でページネーション。
+  const PAGE_SIZE = 50
+  let afterEventId: number | undefined = undefined
+  let page = 0
 
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  while (true) {
+    const args: Record<string, unknown> = {
+      limitnum: PAGE_SIZE,
+      limittononsuspendedevents: true,
+      timesortfrom: from,
+      timesortto: to,
+    }
+    if (afterEventId !== undefined) args.aftereventid = afterEventId
 
-  const json = await res.json() as unknown
-  const payload = Array.isArray(json) ? json[0] : json
-  if (!payload || typeof payload !== 'object') return null
+    const req = [{ index: 0, methodname: 'core_calendar_get_action_events_by_timesort', args }]
+    const res = await fetch(url.toString(), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
-  const p = payload as { error?: boolean; exception?: { message?: string }; data?: unknown }
-  if (p.error) {
-    const msg = p.exception?.message ?? 'Moodle ajax service error'
-    throw new Error(msg)
+    const json = await res.json() as unknown
+    const payload = Array.isArray(json) ? json[0] : json
+    if (!payload || typeof payload !== 'object') break
+
+    const p = payload as { error?: boolean; exception?: { message?: string }; data?: { events?: unknown[]; lastid?: number } }
+    if (p.error) throw new Error(p.exception?.message ?? 'Moodle ajax service error')
+
+    const events = p.data?.events
+    if (!Array.isArray(events) || events.length === 0) break
+
+    collectCmidsDeep(events, allCmids)
+    console.debug(`[Moodline] fetchActionEventCmids page=${page} events=${events.length} lastid=${p.data?.lastid}`)
+
+    // 50件未満なら最終ページ
+    if (events.length < PAGE_SIZE) break
+
+    // 次ページ: lastid があればそれを使い、なければ最後のイベントの id を探す
+    const lastId = p.data?.lastid ?? (events[events.length - 1] as Record<string, unknown>)?.id
+    if (typeof lastId !== 'number') break
+    afterEventId = lastId
+    page++
   }
 
-  const actionEventCmids = new Set<string>()
-  collectCmidsDeep(p.data, actionEventCmids)
+  return allCmids
+}
+
+async function detectFromActionEventsApi(knownCmids: Set<string>): Promise<Map<string, CompletionStatus> | null> {
+  const auth = getServiceUrlAndSesskey()
+  if (!auth) {
+    console.warn('[Moodline] detectFromActionEventsApi: auth unavailable')
+    return null
+  }
+
+  // 月をまたぐイベントの close/due が可視範囲外 (未来側) になるケースをカバーするため
+  // to を 90 日延ばす。from は過去に大きく遡ると件数が増えすぎるため最小限にする。
+  const range = getVisibleCalendarTimeRange()
+  const from = range?.from ?? Math.floor(Date.now() / 1000) - 86400
+  const to = (range?.to ?? Math.floor(Date.now() / 1000)) + (86400 * 90)
+
+  console.debug('[Moodline] detectFromActionEventsApi: querying', {
+    from: new Date(from * 1000).toISOString(),
+    to: new Date(to * 1000).toISOString(),
+    knownCmids: [...knownCmids],
+  })
+
+  const actionEventCmids = await fetchActionEventCmids(auth, from, to)
+  console.debug('[Moodline] detectFromActionEventsApi: actionEventCmids', [...actionEventCmids])
 
   const matched = [...actionEventCmids].filter(cmid => knownCmids.has(cmid))
-  if (!matched.length) return null
+  console.debug('[Moodline] detectFromActionEventsApi: matched', matched)
+
+  if (!matched.length) {
+    console.warn('[Moodline] detectFromActionEventsApi: no knownCmids found in action events → returning null (fallback to DOM)')
+    return null
+  }
 
   const map = new Map<string, CompletionStatus>()
   for (const cmid of knownCmids) {
-    map.set(cmid, actionEventCmids.has(cmid) ? 'incomplete' : 'completed')
+    const status = actionEventCmids.has(cmid) ? 'incomplete' : 'completed'
+    console.debug(`[Moodline] cmid=${cmid} → ${status}`)
+    map.set(cmid, status)
   }
   return map
 }
@@ -245,39 +291,49 @@ export async function fetchCalendarRangeHints(
   const from = (range?.from ?? Math.floor(Date.now() / 1000)) - (86400 * 120)
   const to = (range?.to ?? Math.floor(Date.now() / 1000)) + (86400 * 120)
 
-  const req = [{
-    index: 0,
-    methodname: 'core_calendar_get_action_events_by_timesort',
-    args: {
-      limitnum: 500,
-      limittononsuspendedevents: true,
-      timesortfrom: from,
-      timesortto: to,
-    },
-  }]
-
   const url = new URL(auth.serviceUrl)
   url.searchParams.set('sesskey', auth.sesskey)
 
-  const res = await fetch(url.toString(), {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const map = new Map<string, CalendarRangeHint>()
+  const PAGE_SIZE = 50
+  let afterEventId: number | undefined = undefined
 
-  const json = await res.json() as unknown
-  const payload = Array.isArray(json) ? json[0] : json
-  if (!payload || typeof payload !== 'object') return new Map()
+  while (true) {
+    const args: Record<string, unknown> = {
+      limitnum: PAGE_SIZE,
+      limittononsuspendedevents: true,
+      timesortfrom: from,
+      timesortto: to,
+    }
+    if (afterEventId !== undefined) args.aftereventid = afterEventId
 
-  const p = payload as { error?: boolean; exception?: { message?: string }; data?: unknown }
-  if (p.error) {
-    const msg = p.exception?.message ?? 'Moodle ajax service error'
-    throw new Error(msg)
+    const req = [{ index: 0, methodname: 'core_calendar_get_action_events_by_timesort', args }]
+    const res = await fetch(url.toString(), {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    const json = await res.json() as unknown
+    const payload = Array.isArray(json) ? json[0] : json
+    if (!payload || typeof payload !== 'object') break
+
+    const p = payload as { error?: boolean; exception?: { message?: string }; data?: { events?: unknown[]; lastid?: number } }
+    if (p.error) throw new Error(p.exception?.message ?? 'Moodle ajax service error')
+
+    const events = p.data?.events
+    if (!Array.isArray(events) || events.length === 0) break
+
+    collectRangeHintsDeep(events, knownCmids, map)
+
+    if (events.length < PAGE_SIZE) break
+
+    const lastId = p.data?.lastid ?? (events[events.length - 1] as Record<string, unknown>)?.id
+    if (typeof lastId !== 'number') break
+    afterEventId = lastId
   }
 
-  const map = new Map<string, CalendarRangeHint>()
-  collectRangeHintsDeep(p.data, knownCmids, map)
   return map
 }
